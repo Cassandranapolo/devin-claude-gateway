@@ -1,0 +1,32 @@
+{
+  "name": "devin-claude-gateway",
+  "version": "0.3.0",
+  "description": "Self-hosted gateway that exposes Claude (via Devin web auth) as OpenAI- and Anthropic-compatible endpoints. For personal use with clients like OpenClaw and Hermes.",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "hono": "^4.6.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "author": "Cassandranapolo (https://github.com/Cassandranapolo)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cassandranapolo/devin-claude-gateway.git"
+  }
+}

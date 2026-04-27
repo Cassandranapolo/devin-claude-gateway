@@ -1,0 +1,17 @@
+node_modules/
+dist/
+data/
+*.log
+
+# Local secrets / state — NEVER commit
+.env
+.env.local
+.env.*.local
+state.json
+devin-state.json
+
+# Editor / OS junk
+.DS_Store
+.idea/
+.vscode/
+*.swp

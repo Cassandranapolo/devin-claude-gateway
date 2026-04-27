@@ -1,0 +1,12 @@
+services:
+  gateway:
+    build: .
+    image: devin-claude-gateway:latest
+    container_name: devin-claude-gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
