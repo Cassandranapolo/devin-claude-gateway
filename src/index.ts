@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { logger } from 'hono/logger';
 import { config } from './config.js';
 import { openaiRouter } from './routes/openai.js';
@@ -10,12 +10,13 @@ const app = new Hono();
 
 app.use('*', logger());
 
-// Optional gateway-level API key gate. Allows clients to send either
-// "Authorization: Bearer <key>" or "x-api-key: <key>".
-app.use('*', async (c, next) => {
+// Gateway-level API key check. Mounted only on routes the gateway actually
+// serves (`/v1/*` and `/anthropic/*`). Unknown paths fall through to a
+// natural 404 instead of returning 401, so clients doing capability
+// auto-detection (Ollama-style probes for `/api/tags`, `/v1/props`, etc.)
+// can correctly identify the server type.
+const apiKeyGate: MiddlewareHandler = async (c, next) => {
   if (!config.gatewayApiKey) return next();
-  if (c.req.path === '/health' || c.req.path === '/') return next();
-
   const auth = c.req.header('authorization');
   const xApiKey = c.req.header('x-api-key');
   const presented = auth?.replace(/^Bearer\s+/i, '').trim() ?? xApiKey?.trim();
@@ -23,12 +24,12 @@ app.use('*', async (c, next) => {
     return c.json({ error: { message: 'Invalid gateway API key.', type: 'authentication_error' } }, 401);
   }
   return next();
-});
+};
 
 app.get('/', c =>
   c.json({
     name: 'devin-claude-gateway',
-    version: '0.3.0',
+    version: '0.3.2',
     endpoints: {
       openai_compatible: ['/v1/chat/completions', '/v1/models'],
       anthropic_compatible: ['/anthropic/v1/messages'],
@@ -39,6 +40,14 @@ app.get('/', c =>
 );
 
 app.get('/health', c => c.json({ ok: true }));
+
+// Apply auth only to the routes we actually serve, so that probes for
+// unsupported paths (Ollama-style `/api/tags`, llama.cpp `/v1/props`, etc.)
+// return a natural 404 instead of a misleading 401.
+app.use('/v1/chat/completions', apiKeyGate);
+app.use('/v1/models', apiKeyGate);
+app.use('/v1/models/*', apiKeyGate);
+app.use('/anthropic/v1/messages', apiKeyGate);
 
 app.route('/v1', openaiRouter);
 app.route('/anthropic', anthropicRouter);

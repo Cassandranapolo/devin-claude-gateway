@@ -90,12 +90,12 @@ if [[ -f "$ENV_FILE" ]]; then
 else
   cat <<'BANNER'
 
-Gateway perlu 3 nilai dari browser Devin-mu:
-  - DEVIN_BEARER         (token "auth1_..." dari localStorage)
-  - DEVIN_ORG_ID         ("org-..." 32 hex)
-  - DEVIN_COOKIE         (document.cookie isi tab Devin)
+Gateway perlu 3 nilai dari browser Devin-mu (DEVIN_BEARER wajib, lainnya
+opsional). Cara paling cepat:
 
-Cara ambil cepat: buka https://app.devin.ai (sudah login), F12 -> Console, paste:
+  1. Buka https://app.devin.ai (sudah login), klik salah satu sesi.
+  2. F12 -> Console, paste snippet di bawah lalu Enter.
+  3. Hasilnya otomatis ke clipboard, paste di sini saat diminta.
 
   (() => {
     const a = JSON.parse(localStorage.getItem('auth1_session') || '{}');
@@ -105,13 +105,30 @@ Cara ambil cepat: buka https://app.devin.ai (sudah login), F12 -> Console, paste
     return 'Copied: ' + out.length + ' chars';
   })()
 
-Lalu paste hasilnya di sini ketika diminta.
+Tip: kamu juga bisa preset via env var sebelum jalanin install.sh, contoh:
+  DEVIN_BEARER=auth1_xxx DEVIN_ORG_ID=org-xxx bash install.sh
 
 BANNER
 
-  read -rp "DEVIN_BEARER: " DEVIN_BEARER
-  read -rp "DEVIN_ORG_ID: " DEVIN_ORG_ID
-  read -rp "DEVIN_COOKIE (boleh kosong, optional): " DEVIN_COOKIE
+  # Allow env-var preset (skips prompts for fields already set).
+  DEVIN_BEARER="${DEVIN_BEARER:-}"
+  DEVIN_ORG_ID="${DEVIN_ORG_ID:-}"
+  DEVIN_COOKIE="${DEVIN_COOKIE:-}"
+
+  # Read from controlling terminal so this script also works under
+  # `curl ... | bash` where stdin is the curl pipe.
+  TTY_IN=/dev/tty
+  if [[ ! -r "$TTY_IN" ]]; then TTY_IN=/dev/stdin; fi
+
+  if [[ -z "$DEVIN_BEARER" ]]; then
+    read -rp "DEVIN_BEARER: " DEVIN_BEARER < "$TTY_IN"
+  fi
+  if [[ -z "$DEVIN_ORG_ID" ]]; then
+    read -rp "DEVIN_ORG_ID (boleh kosong, akan auto-resolve): " DEVIN_ORG_ID < "$TTY_IN" || true
+  fi
+  if [[ -z "$DEVIN_COOKIE" ]]; then
+    read -rp "DEVIN_COOKIE (boleh kosong, optional): " DEVIN_COOKIE < "$TTY_IN" || true
+  fi
 
   if [[ -z "$DEVIN_BEARER" ]]; then
     err "DEVIN_BEARER wajib diisi."
@@ -163,17 +180,26 @@ else
   warn "cek logs: docker compose logs --tail=50"
 fi
 
+PUBLIC_IP="$(curl -fsS --max-time 3 https://api.ipify.org 2>/dev/null || echo "<ip-vps>")"
+
 cat <<EOF
 
 ==== install.sh selesai ====
 
-Endpoint kamu:
-  OpenAI-compatible:    http://<ip-vps>:$PORT/v1
-  Anthropic-compatible: http://<ip-vps>:$PORT/anthropic
-  Model:                claude-opus-4-7
-  API Key:              (lihat 'grep GATEWAY_API_KEY $ENV_FILE')
+  ====== Config siap copas ke client (OpenClaw / Hermes / Cline / dll.) ======
+  Provider:   custom / openai-compatible
+  Base URL:   http://${PUBLIC_IP}:$PORT/v1                  (atau http://localhost:$PORT/v1 kalau client di mesin yang sama)
+  API Key:    $KEY
+  Model:      claude-opus-4-7
 
-Auto-refresh DEVIN_BEARER (recommended):
+  Anthropic-style (untuk klien yang langsung pakai SDK Anthropic):
+  Base URL:   http://${PUBLIC_IP}:$PORT/anthropic
+
+  Mau ganti / tambah model alias? Edit MODEL_ALIASES di .env, contoh:
+    MODEL_ALIASES=gpt-4=devin-opus-4-7,gpt-4o=devin-2-5
+  Lalu: docker compose up -d --force-recreate
+
+Auto-refresh DEVIN_BEARER (rekomendasi, supaya gak perlu update token tiap 30 menit):
   bash scripts/install-refresh.sh --cron 15
   node scripts/refresh-bearer.cjs --bootstrap   (di laptop yang punya layar)
   scp data/devin-state.json user@vps:$ROOT/data/

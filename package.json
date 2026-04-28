@@ -1,6 +1,6 @@
 {
   "name": "devin-claude-gateway",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Self-hosted gateway that exposes Claude (via Devin web auth) as OpenAI- and Anthropic-compatible endpoints. For personal use with clients like OpenClaw and Hermes.",
   "type": "module",
   "main": "dist/index.js",

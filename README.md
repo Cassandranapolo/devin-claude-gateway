@@ -226,14 +226,77 @@ Ambil API key:
 grep ^GATEWAY_API_KEY .env | cut -d= -f2
 ```
 
-Aliasing model:
+## Cara ganti model & tambah alias
 
-| Yang kamu minta | Yang dikirim ke Devin (`devin_version_override`) |
+Gateway ini cuma punya 3 model Devin di backend. Semua nama model yang
+kamu kirim dari klien (OpenAI / Anthropic style) akan di-_resolve_ ke
+salah satu dari ini:
+
+| Devin model id | Cocok buat |
+|---|---|
+| `devin-opus-4-7` | Claude Opus 4.7 (default) |
+| `devin-2-5` | Claude 3.5 Sonnet–style |
+| `devin-0929-brocade` | varian Devin lain |
+
+### Built-in alias (tidak perlu setting apa-apa)
+
+| Yang kamu minta | Yang dikirim ke Devin |
 |---|---|
 | `claude-opus-*`, `devin-opus-4-7` (default) | `devin-opus-4-7` |
 | `claude-sonnet-*`, `claude-3-5-sonnet*`, `devin-2-5` | `devin-2-5` |
 | `devin-0929-brocade` | `devin-0929-brocade` |
-| lainnya | nilai `DEVIN_MODEL_DEFAULT` di `.env` |
+| nama lain | nilai `DEVIN_MODEL_DEFAULT` di `.env` |
+
+### Ganti default model
+
+Edit `.env`:
+
+```bash
+DEVIN_MODEL_DEFAULT=devin-2-5    # default jadi Claude 3.5 Sonnet–style
+```
+
+Lalu reload:
+```bash
+docker compose up -d --force-recreate
+```
+
+### Tambah alias custom (mis. supaya klien yang minta `gpt-4` ikut ke Claude)
+
+Edit `.env`, tambah baris `MODEL_ALIASES`:
+
+```bash
+# Format: dari1=ke1,dari2=ke2 (alias di kiri, target Devin di kanan)
+MODEL_ALIASES=gpt-4=devin-opus-4-7,gpt-4o=devin-2-5,o1=devin-opus-4-7,kimi-k2=devin-opus-4-7
+```
+
+Aturan:
+- Sisi `dari` = nama model yang client kirim (case-insensitive).
+- Sisi `ke` **wajib** salah satu dari `devin-opus-4-7`, `devin-2-5`,
+  `devin-0929-brocade`. Selain itu di-ignore.
+- `MODEL_ALIASES` punya prioritas tertinggi (di-cek sebelum aturan
+  built-in `claude-*`).
+
+Reload:
+```bash
+docker compose up -d --force-recreate
+```
+
+Test alias:
+```bash
+KEY="$(grep ^GATEWAY_API_KEY .env | cut -d= -f2)"
+curl -s http://localhost:3000/v1/chat/completions \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4","messages":[{"role":"user","content":"hi"}]}' | head -c 200
+```
+
+### Daftar model yang muncul di klien
+
+Endpoint `GET /v1/models` (yang biasa di-poll OpenClaw / Hermes untuk
+populasi dropdown) selalu balikin 4 model bawaan: 3 id Devin di atas
+plus alias `claude-opus-4-7`. Kalau kliennya support manual model entry
+(ketik bebas), kamu bisa kirim **alias apa saja** yang sudah didefinisi
+di `MODEL_ALIASES`.
 
 ## Auto-refresh DEVIN_BEARER (rekomendasi)
 
@@ -364,6 +427,8 @@ Daftar key yang umum diubah:
 | Container restart loop | Build error / .env salah | `docker compose logs --tail=50` |
 | Port 3000 dipake | Aplikasi lain pakai 3000 | Ganti `PORT=3300` di `.env` + edit `docker-compose.yml` jadi `"3300:3000"`. |
 | Auto-refresh `state file is stale` | State file expired | Bootstrap ulang di laptop, scp lagi state file-nya. |
+| `Invalid gateway API key` (401) | Klien kirim `Authorization: Bearer <key>` yang beda dengan `GATEWAY_API_KEY` di `.env` | Jalankan `grep ^GATEWAY_API_KEY .env`, copy nilainya **persis** ke setting client (tanpa spasi/newline). Pastikan client di-restart setelah ganti config — banyak klien (Hermes, dll.) cache config di memory. |
+| 401 hanya pas pakai client tertentu, padahal `curl` sukses | Client melakukan service-discovery probes (`/api/tags`, `/v1/props`, dll.) tanpa auth header | Sejak v0.3.2 path yang gak dikenal balikin 404 (bukan 401). Update gateway: `git pull && docker compose up -d --build`. |
 
 ## Cara update ke versi terbaru
 

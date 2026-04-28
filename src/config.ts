@@ -66,11 +66,40 @@ export const DEVIN_MODELS = [
   { id: 'claude-opus-4-7', name: 'Claude Opus 4.7 (alias \u2192 devin-opus-4-7)', owned_by: 'cognition' },
 ];
 
+const VALID_DEVIN_MODELS = new Set(['devin-opus-4-7', 'devin-2-5', 'devin-0929-brocade']);
+
+// User-defined aliases via MODEL_ALIASES env var.
+// Format: "from1=to1,from2=to2" (case-insensitive on the `from` side).
+// Example: MODEL_ALIASES="gpt-4=devin-opus-4-7,gpt-4o=devin-2-5"
+function parseModelAliases(): Record<string, string> {
+  const raw = process.env.MODEL_ALIASES?.trim();
+  if (!raw) return {};
+  const out: Record<string, string> = {};
+  for (const pair of raw.split(',')) {
+    const eq = pair.indexOf('=');
+    if (eq < 0) continue;
+    const from = pair.slice(0, eq).trim().toLowerCase();
+    const to = pair.slice(eq + 1).trim();
+    if (from && to) out[from] = to;
+  }
+  return out;
+}
+
+const customAliases = parseModelAliases();
+
 export function resolveDevinModel(requested: string | undefined): string {
   if (!requested) return config.devinModelDefault;
   const lower = requested.toLowerCase();
+  // 1. User-defined custom aliases take highest priority.
+  if (customAliases[lower]) {
+    const target = customAliases[lower];
+    if (VALID_DEVIN_MODELS.has(target)) return target;
+  }
+  // 2. Built-in family aliases.
   if (lower.startsWith('claude-opus')) return 'devin-opus-4-7';
   if (lower.startsWith('claude-sonnet') || lower.startsWith('claude-3-5-sonnet')) return 'devin-2-5';
+  // 3. Pass-through for known Devin model ids.
   if (DEVIN_MODELS.some(m => m.id === requested)) return requested;
+  // 4. Fallback default.
   return config.devinModelDefault;
 }
