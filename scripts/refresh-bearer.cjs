@@ -149,12 +149,12 @@ async function refresh() {
   }
 
   log('restarting gateway container...');
-  const r = spawnSync('docker', ['compose', 'restart', 'gateway'], {
+  const r = spawnSync('docker', ['compose', 'up', '-d', '--force-recreate', 'gateway'], {
     cwd: ROOT,
     stdio: 'inherit',
   });
   if (r.status !== 0) {
-    err(`docker compose restart returned ${r.status}; you may need to restart manually.`);
+    err(`docker compose up -d --force-recreate returned ${r.status}; you may need to restart manually.`);
   } else {
     log('gateway restarted.');
   }
