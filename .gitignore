@@ -15,3 +15,7 @@ devin-state.json
 .idea/
 .vscode/
 *.swp
+.env.switch
+data/backups/
+scripts/refresh-bearer.cjs.bak
+.env.bak.*

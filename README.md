@@ -443,3 +443,60 @@ service Cognition. Pastikan kamu pakai sesuai TOS Devin.
   network di DevTools tab kamu sendiri
 - Inspirasi: `Galkurta/AI-Gateway`'s `devin-web` adapter (yang sering 401
   karena nggak handle org_id resolution / auth1 tokens)
+
+## Switching to a new Devin account
+
+If your current Devin account hits `out_of_quota` or you want to use a different
+account, you can switch in one command — either fully automated (PC + Chromium)
+or fully manual (any device with a browser + SSH).
+
+### Option A — automated switch (requires a desktop / Chromium)
+
+One-time setup on the PC that has the repo:
+
+```bash
+cp .env.switch.example .env.switch
+# Edit .env.switch and set VPS_HOST (e.g. ubuntu@1.2.3.4) and VPS_PATH.
+ssh "$VPS_HOST" 'echo ok'   # confirm passwordless SSH to VPS works
+```
+
+Then any time you want to switch account, on the PC:
+
+```bash
+bash scripts/switch-account.sh
+```
+
+This backs up the current state, opens Chromium for an interactive Devin login
+with the new account, uploads the new `state.json` to the VPS, refreshes the
+bearer, recreates the gateway container with the new env, and finally hits
+`/v1/chat/completions` to verify the new account works end-to-end.
+
+### Option B — manual bearer (works from any device, including phone)
+
+If you don't have a desktop Chromium (e.g. you only use a phone), you can paste
+the auth1 bearer manually.
+
+1. Log in to https://app.devin.ai in any browser. On Android the easiest option
+   is **Kiwi Browser** which has DevTools built in. On stock Chrome you can use
+   the [Eruda](https://github.com/liriliri/eruda) bookmarklet to get DevTools.
+2. Open DevTools -> Application / Storage -> Cookies / Local Storage -> find
+   `storage_auth1_session`. Copy the `token` value (looks like
+   `auth1_xxxxxxxxxxxxxxxxxxxxxxxxxxxx`).
+3. SSH to the VPS (e.g. with Termius / JuiceSSH on a phone) and run:
+
+   ```bash
+   cd ~/devin-claude-gateway
+   bash scripts/manual-set-bearer.sh auth1_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+   The script backs up `.env`, replaces `DEVIN_BEARER`, clears `DEVIN_ORG_ID`
+   so it gets re-resolved from the new bearer, recreates the container with
+   `docker compose up -d --force-recreate`, and verifies the gateway responds
+   on `/v1/chat/completions`.
+
+If the gateway still rejects requests after only updating the bearer (some
+accounts also need a fresh cookie), pass the cookie as the second argument:
+
+```bash
+bash scripts/manual-set-bearer.sh auth1_xxxxx 'cookie1=val1; cookie2=val2'
+```
