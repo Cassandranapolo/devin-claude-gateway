@@ -34,11 +34,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-color() { printf '\033[%sm%s\033[0m\n' "$1" "$2"; }
-info()  { color '1;36' "[install] $*"; }
-warn()  { color '1;33' "[warn]    $*"; }
-err()   { color '1;31' "[error]   $*"; }
-ok()    { color '1;32' "[ok]      $*"; }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/_lib.sh
+source "$SCRIPT_DIR/scripts/_lib.sh"
 
 # --- 1. Optionally clone ----------------------------------------------------
 if [[ "$DO_CLONE" == "1" ]]; then
@@ -121,11 +119,13 @@ BANNER
   GATEWAY_API_KEY="$(openssl rand -hex 32)"
 
   cp .env.example "$ENV_FILE"
-  sed -i.bak "s|^DEVIN_BEARER=.*|DEVIN_BEARER=$DEVIN_BEARER|"  "$ENV_FILE"
-  sed -i.bak "s|^DEVIN_ORG_ID=.*|DEVIN_ORG_ID=$DEVIN_ORG_ID|"  "$ENV_FILE"
-  sed -i.bak "s|^DEVIN_COOKIE=.*|DEVIN_COOKIE=$DEVIN_COOKIE|"  "$ENV_FILE"
-  sed -i.bak "s|^GATEWAY_API_KEY=.*|GATEWAY_API_KEY=$GATEWAY_API_KEY|" "$ENV_FILE"
-  rm -f "$ENV_FILE.bak"
+  env_set "$ENV_FILE" DEVIN_BEARER     "$DEVIN_BEARER"
+  env_set "$ENV_FILE" DEVIN_ORG_ID     "$DEVIN_ORG_ID"
+  # Cookie value sering punya literal '$' (mis. _ga_...$o2$g1$t...) yang bisa
+  # di-interpretasi docker-compose sebagai variable substitution. Escape '$'
+  # ke '$$' biar nilainya dipassthrough verbatim ke container.
+  env_set "$ENV_FILE" DEVIN_COOKIE     "$(escape_dollar "$DEVIN_COOKIE")"
+  env_set "$ENV_FILE" GATEWAY_API_KEY  "$GATEWAY_API_KEY"
   chmod 600 "$ENV_FILE"
   ok ".env tertulis dengan GATEWAY_API_KEY baru."
 fi

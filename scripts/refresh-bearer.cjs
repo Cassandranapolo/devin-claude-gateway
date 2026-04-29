@@ -75,7 +75,19 @@ async function bootstrap() {
   await page.waitForTimeout(4000);
 
   fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-  await ctx.storageState({ path: STATE_PATH });
+  try {
+    await ctx.storageState({ path: STATE_PATH });
+  } catch (e) {
+    if (e && e.code === 'EACCES') {
+      err(`EACCES: tidak bisa nulis ke ${STATE_PATH}.`);
+      err(`folder data/ kemungkinan owned by root karena Docker mount.`);
+      err(`fix: sudo chown -R "$USER:$USER" "${path.dirname(STATE_PATH)}"`);
+      err(`lalu jalanin ulang: node scripts/refresh-bearer.cjs --bootstrap`);
+      await browser.close();
+      process.exit(4);
+    }
+    throw e;
+  }
   fs.chmodSync(STATE_PATH, 0o600);
   log(`saved state to ${STATE_PATH}`);
 
@@ -122,21 +134,30 @@ async function refresh() {
   await page.waitForTimeout(2000);
 
   if (/\/auth\//.test(page.url())) {
-    err(`state file is stale (browser bounced to ${page.url()}). re-run with --bootstrap.`);
+    err(`state file STALE (browser dipantulkan ke ${page.url()}).`);
+    err(`fix: ulangi bootstrap di mesin ber-GUI:`);
+    err(`     node scripts/refresh-bearer.cjs --bootstrap`);
+    err(`     (lalu scp data/devin-state.json ke VPS kalau bootstrap di laptop)`);
     await browser.close();
     process.exit(2);
   }
 
   const result = await readAuth(page);
   if (!result.token) {
-    err(`could not read bearer: ${result.error || 'unknown'}`);
+    err(`tidak bisa baca bearer dari localStorage: ${result.error || 'unknown'}`);
+    err(`fix: ulangi bootstrap (auth1_session sudah expired atau hilang):`);
+    err(`     node scripts/refresh-bearer.cjs --bootstrap`);
     await browser.close();
     process.exit(3);
   }
 
   log(`extracted bearer (length=${result.token.length}); updating ${ENV_PATH}`);
   updateEnvLine(ENV_PATH, 'DEVIN_BEARER', result.token);
-  if (result.orgId) updateEnvLine(ENV_PATH, 'DEVIN_ORG_ID', result.orgId);
+  if (result.orgId) {
+    updateEnvLine(ENV_PATH, 'DEVIN_ORG_ID', result.orgId);
+  } else {
+    log('warning: DEVIN_ORG_ID tidak terbaca dari localStorage, nilai lama dipertahankan.');
+  }
 
   // Persist refreshed cookies for next run.
   await ctx.storageState({ path: STATE_PATH });

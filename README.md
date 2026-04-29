@@ -364,6 +364,9 @@ Daftar key yang umum diubah:
 | Container restart loop | Build error / .env salah | `docker compose logs --tail=50` |
 | Port 3000 dipake | Aplikasi lain pakai 3000 | Ganti `PORT=3300` di `.env` + edit `docker-compose.yml` jadi `"3300:3000"`. |
 | Auto-refresh `state file is stale` | State file expired | Bootstrap ulang di laptop, scp lagi state file-nya. |
+| Bootstrap `EACCES open ... data/devin-state.json` | Folder `data/` owned by root karena Docker mount | `sudo chown -R $USER:$USER ~/devin-claude-gateway/data && node scripts/refresh-bearer.cjs --bootstrap` |
+| `WARN The "o2" variable is not set...` saat `docker compose up` | Cookie GA punya literal `$` yang ditafsir compose sebagai variable | Sudah otomatis di-escape kalau pakai `install.sh` / `manual-set-bearer.sh` versi baru. Untuk `.env` lama: `sed -i '/^DEVIN_COOKIE=/ s/\$/\$\$/g' .env` |
+| 401 `No organizations found for auth1 user` | `DEVIN_ORG_ID` kosong & auto-resolve gagal | Ambil org_id dari console: `localStorage.getItem('last-internal-org-for-external-org-v1-null')` lalu: `bash scripts/manual-set-bearer.sh '<bearer>' '' '<org_id>'` |
 
 ## Cara update ke versi terbaru
 
@@ -420,9 +423,13 @@ src/
     openai.ts          # /v1/chat/completions, /v1/models
     anthropic.ts       # /anthropic/v1/messages
 scripts/
-  install-refresh.sh   # install Playwright + cron
-  refresh-bearer.cjs   # bootstrap & headless refresh
-  extract-cookie.js    # one-shot cookie helper (alternative)
+  _lib.sh                  # shared bash helpers (logging, env_set, escape_dollar)
+  install-refresh.sh       # install Playwright + cron + chown data/
+  refresh-bearer.cjs       # bootstrap & headless refresh
+  manual-set-bearer.sh     # paste auth1_bearer manual (no Chromium needed)
+  switch-account.sh        # full-auto account switch from PC -> VPS
+  accept-new-account.sh    # called on VPS by switch-account.sh
+  extract-cookie.js        # one-shot cookie helper (alternative)
 install.sh             # one-line installer (clone + setup + start)
 docker-compose.yml
 Dockerfile
@@ -489,10 +496,10 @@ the auth1 bearer manually.
    bash scripts/manual-set-bearer.sh auth1_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
    ```
 
-   The script backs up `.env`, replaces `DEVIN_BEARER`, clears `DEVIN_ORG_ID`
-   so it gets re-resolved from the new bearer, recreates the container with
-   `docker compose up -d --force-recreate`, and verifies the gateway responds
-   on `/v1/chat/completions`.
+   The script backs up `.env`, replaces `DEVIN_BEARER`, **preserves**
+   `DEVIN_ORG_ID` lama (kecuali kamu pasang `--clear-org`), recreates the
+   container with `docker compose up -d --force-recreate`, and verifies the
+   gateway responds on `/v1/chat/completions`.
 
 If the gateway still rejects requests after only updating the bearer (some
 accounts also need a fresh cookie), pass the cookie as the second argument:
@@ -500,3 +507,16 @@ accounts also need a fresh cookie), pass the cookie as the second argument:
 ```bash
 bash scripts/manual-set-bearer.sh auth1_xxxxx 'cookie1=val1; cookie2=val2'
 ```
+
+Kalau kamu pindah ke akun yang `org_id`-nya beda, kasih juga sebagai argumen
+ke-3 (ambil dari console: `localStorage.getItem('last-internal-org-for-external-org-v1-null')`):
+
+```bash
+bash scripts/manual-set-bearer.sh auth1_xxxxx 'cookie_string' org-1234567890abcdef1234567890abcdef
+```
+
+Kenapa default-nya preserve, bukan clear? Auto-resolve org_id dari bearer
+baru kadang gagal dengan 401 `No organizations found for auth1 user`.
+Selama org_id lama masih valid untuk akun baru (umum kalau pindah antar
+akun di org yang sama), preserve lebih aman. Kalau memang harus auto-resolve
+(akun di org lain), jalanin dengan `--clear-org`.
