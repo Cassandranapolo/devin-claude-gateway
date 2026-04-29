@@ -1,13 +1,27 @@
 #!/usr/bin/env bash
-# Install the Playwright-based bearer refresher and (optionally) a cron job.
+# scripts/install-refresh.sh — install Playwright + Chromium + libs +
+# (optional) crontab supaya DEVIN_BEARER bisa di-refresh otomatis tiap N menit.
 #
 # Usage:
 #   bash scripts/install-refresh.sh                # install deps only
-#   bash scripts/install-refresh.sh --cron 15      # also install crontab @ every N minutes
+#   bash scripts/install-refresh.sh --cron 15      # juga pasang crontab tiap 15 menit
 #
+# Yang di-install:
+#   - npm package "playwright" (di node_modules/)
+#   - Chromium binary buat Playwright (~170 MB)
+#   - System libs Chromium (libnss3, libxkbcommon0, dst -- best-effort)
+#   - Crontab entry (kalau --cron diberi)
+#
+# Yang di-fix vs versi lama:
+#   - chown data/ ke user yang lagi jalanin script, supaya bootstrap nanti
+#     ga kena EACCES (folder data/ jadi root-owned setelah Docker mount).
+
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=scripts/_lib.sh
+source "$SCRIPT_DIR/_lib.sh"
 cd "$ROOT"
 
 CRON_MIN=""
@@ -17,84 +31,109 @@ while [[ $# -gt 0 ]]; do
       CRON_MIN="${2:-15}"
       shift 2
       ;;
+    -h|--help)
+      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
     *)
-      echo "unknown arg: $1"
+      err "argumen tidak dikenal: $1"
       exit 2
       ;;
   esac
 done
 
-if ! command -v node >/dev/null 2>&1; then
-  echo "node is not installed. install Node 20+ first:"
-  echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
-  echo "  sudo apt-get install -y nodejs"
-  exit 1
-fi
+require_cmd node "install Node 20+ dulu:
+       curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+       sudo apt-get install -y nodejs"
+require_cmd npm "install npm dulu (bareng Node)"
 
 if ! [ -d node_modules/playwright ]; then
-  echo "[install] adding playwright..."
+  info "install paket playwright (npm) ..."
   npm install playwright --no-audit --no-fund --no-save
+else
+  info "playwright sudah terpasang, skip npm install"
 fi
 
-echo "[install] downloading Chromium for Playwright..."
+info "download Chromium binary buat Playwright ..."
 npx --yes playwright install chromium
 
-# Try to install Chromium runtime libs. Best-effort; non-fatal on missing sudo.
-echo "[install] installing system libraries Chromium needs (best-effort)..."
+info "install system libs Chromium (best-effort, butuh sudo) ..."
 sudo apt-get update -y >/dev/null 2>&1 || true
 sudo apt-get install -y \
   libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 \
   libcairo2 libasound2 libatspi2.0-0 fonts-liberation \
-  >/dev/null 2>&1 || true
+  >/dev/null 2>&1 || warn "apt-get install gagal/sudo tidak tersedia (skip, mungkin udah lengkap)"
 
+info "siapkan folder data/ + ambil ownership ke $USER ..."
 mkdir -p "$ROOT/data" 2>/dev/null || true
+# Folder data/ sering dimount ke container Docker yang jalan sebagai root,
+# sehingga file di dalamnya jadi root-owned. Bootstrap (yang jalan sebagai
+# user biasa) akan kena EACCES kalau ga di-chown duluan.
+if ! [ -w "$ROOT/data" ] || [ "$(stat -c '%U' "$ROOT/data" 2>/dev/null || echo "")" != "$USER" ]; then
+  if sudo -n true 2>/dev/null || [ "$(id -u)" = "0" ]; then
+    sudo chown -R "$USER:$USER" "$ROOT/data" 2>/dev/null || true
+    ok "data/ sekarang owned by $USER"
+  else
+    warn "data/ ga writable oleh $USER dan sudo tidak passwordless."
+    hint "jalanin manual: sudo chown -R \$USER:\$USER $ROOT/data"
+  fi
+fi
 chmod 700 "$ROOT/data" 2>/dev/null || true
 
 if [[ -n "$CRON_MIN" ]]; then
   CRON_LINE="*/$CRON_MIN * * * * cd $ROOT && /usr/bin/env node scripts/refresh-bearer.cjs >> $ROOT/data/refresh.log 2>&1"
-  echo "[install] adding crontab line:"
+  info "pasang crontab line:"
   echo "  $CRON_LINE"
   TMP="$(mktemp)"
+  TMP_NEW="$(mktemp)"
   crontab -l 2>/dev/null > "$TMP" || true
-  # Remove any existing entry for this script
-  grep -v 'scripts/refresh-bearer.cjs' "$TMP" > "${TMP}.new" || true
-  echo "$CRON_LINE" >> "${TMP}.new"
-  crontab "${TMP}.new"
-  rm -f "$TMP" "${TMP}.new"
-  echo "[install] cron installed. current crontab:"
+  # Hapus entry lama untuk script ini supaya ga dobel
+  grep -v 'scripts/refresh-bearer.cjs' "$TMP" > "$TMP_NEW" || true
+  echo "$CRON_LINE" >> "$TMP_NEW"
+  crontab "$TMP_NEW"
+  rm -f "$TMP" "$TMP_NEW"
+  ok "cron terpasang. crontab sekarang:"
   crontab -l
+else
+  warn "crontab tidak dipasang. Tanpa cron, bearer auth1 expired tiap 15-30 menit."
+  hint "pasang nanti dengan: bash $0 --cron 15"
 fi
 
 cat <<EOF
 
-==== install-refresh done ====
+==== install-refresh selesai ====
 
-Next steps:
+LANGKAH BERIKUTNYA (urut, per mesin):
 
-  1. Bootstrap once on a machine with a screen (your laptop's WSL with an X
-     server, or this VPS via SSH -X if MobaXterm/X11 forwarding is enabled):
+  [LAPTOP/PC dengan layar]  bootstrap state file (one-time):
 
-       node scripts/refresh-bearer.cjs --bootstrap
+      git clone https://github.com/Cassandranapolo/devin-claude-gateway.git
+      cd devin-claude-gateway
+      bash scripts/install-refresh.sh           # tanpa --cron, deps doang
+      node scripts/refresh-bearer.cjs --bootstrap
 
-     A Chromium window opens. Log in to Devin (email -> get code from your
-     mailbox -> paste code -> land on /sessions). The script saves
-     ./data/devin-state.json automatically.
+      (Atau di VPS ini lewat MobaXterm/SSH -X kalau X11 forwarding aktif.)
 
-  2. If you ran bootstrap on your laptop, copy the state file to the VPS:
+      Chromium kebuka -> login Devin lewat email + kode 6 digit ->
+      tunggu sampai URL berakhiran /sessions -> script auto-save state.
 
-       scp data/devin-state.json user@vps:~/devin-claude-gateway/data/
+  [LAPTOP/PC -> VPS]  upload state file:
 
-  3. Trigger a manual refresh on the VPS to confirm it works:
+      scp data/devin-state.json $USER@<vps-ip>:$ROOT/data/
 
-       node scripts/refresh-bearer.cjs
+  [VPS]  test refresh manual sekali:
 
-     This should rewrite DEVIN_BEARER in .env and restart the gateway container.
+      cd $ROOT
+      node scripts/refresh-bearer.cjs
 
-  4. (If you didn't pass --cron) set up cron yourself, eg every 15 minutes:
+      Output yang diharapkan:
+        [ts] navigating to https://app.devin.ai/sessions ...
+        [ts] extracted bearer (length=58); updating $ROOT/.env
+        [ts] gateway restarted.
 
-       (crontab -l 2>/dev/null; echo "*/15 * * * * cd $ROOT && node scripts/refresh-bearer.cjs >> $ROOT/data/refresh.log 2>&1") | crontab -
+  [VPS]  pantau cron jalan tiap $([ -n "$CRON_MIN" ] && echo "$CRON_MIN" || echo "N") menit:
 
-  5. Watch log:    tail -f $ROOT/data/refresh.log
+      tail -f $ROOT/data/refresh.log
 
 EOF
